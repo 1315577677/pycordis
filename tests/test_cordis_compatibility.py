@@ -19,7 +19,7 @@ def test_plugin_registry_accepts_function_and_exposes_its_fiber() -> None:
     assert context.registry.has(answer_plugin)
     assert context.get("answer") == 42
 
-    fiber.dispose()
+    asyncio.run(fiber.dispose())
 
     assert context.get("answer") is None
     assert context.registry.has(answer_plugin) is False
