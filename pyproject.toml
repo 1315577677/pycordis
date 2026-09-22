@@ -8,8 +8,10 @@ version = "0.1.0"
 description = "A small, reversible plugin kernel inspired by Cordis."
 requires-python = ">=3.11"
 
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-cov>=5"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = "-ra"
-

@@ -1,0 +1,11 @@
+README.md
+pyproject.toml
+src/pycordis/__init__.py
+src/pycordis/core.py
+src/pycordis/errors.py
+src/pycordis.egg-info/PKG-INFO
+src/pycordis.egg-info/SOURCES.txt
+src/pycordis.egg-info/dependency_links.txt
+src/pycordis.egg-info/requires.txt
+src/pycordis.egg-info/top_level.txt
+tests/test_kernel.py
