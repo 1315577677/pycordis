@@ -46,6 +46,21 @@ class Plugin:
     inject: tuple[str, ...] = ()
 
 
+class Service:
+    """Base class for plugins that provide a stable named context service."""
+
+    def __init__(self, ctx: Context, name: str) -> None:
+        self.ctx = ctx
+        self.name = name
+        self._dispose = ctx.provide(name, self)
+
+    def resolve_config(
+        self, base: Mapping[str, object] | None = None, head: Mapping[str, object] | None = None
+    ) -> dict[str, object]:
+        """Resolve this service's intercepted configuration for the current context."""
+        return self.ctx.resolve_config(self.name, base, head)
+
+
 class PluginRegistry:
     """Owns the live fibers for each normalized plugin callback."""
 
@@ -210,6 +225,8 @@ class Context:
         self._services: dict[str, object] = {}
         self._service_disposers: dict[str, Cleanup] = {}
         self._listeners: dict[str, list[Listener]] = defaultdict(list)
+        self._accessors: dict[str, tuple[Callable[[Context], object], Callable[[object], bool] | None]] = {}
+        self._intercepts: dict[str, dict[str, object]] = {}
         self._handles: list[PluginHandle] = []
         self._fibers: list[Fiber] = []
         self._scope_stack: list[PluginHandle | Fiber] = []
@@ -235,6 +252,30 @@ class Context:
         isolated = self.child()
         isolated._isolated.add(name)
         return isolated
+
+    def intercept(self, name: str, config: Mapping[str, object]) -> Context:
+        """Create a child context with configuration overlaid for one service."""
+        intercepted = self.child()
+        intercepted._intercepts[name] = dict(config)
+        return intercepted
+
+    def resolve_config(
+        self,
+        name: str,
+        base: Mapping[str, object] | None = None,
+        head: Mapping[str, object] | None = None,
+    ) -> dict[str, object]:
+        """Merge a service's intercept config from root to this context."""
+        contexts: list[Context] = []
+        current: Context | None = self
+        while current is not None:
+            contexts.append(current)
+            current = current._parent
+        result = dict(base or {})
+        for context in reversed(contexts):
+            result.update(context._intercepts.get(name, {}))
+        result.update(head or {})
+        return result
 
     def mount(self, plugin: Plugin) -> PluginHandle:
         """Mount a plugin, activating it when all declared services are present."""
@@ -286,6 +327,18 @@ class Context:
         self._request_refresh()
         return disposer
 
+    def set(self, name: str, service: object | None) -> None:
+        """Replace a service only when it is owned by this context."""
+        if name in self._services:
+            self._services[name] = service
+            self._request_refresh()
+            return
+        if self._parent is not None and self._parent.has(name):
+            raise PermissionError(
+                f"Service {name!r} is provided by another context and cannot be replaced here"
+            )
+        raise KeyError(f"Service {name!r} has not been provided")
+
     def get(self, name: str, strict: bool = True) -> object | None:
         """Look up a service locally, then through ancestor contexts."""
         if name in self._services:
@@ -301,6 +354,46 @@ class Context:
         if name in self._isolated or self._parent is None:
             return False
         return self._parent.has(name)
+
+    def accessor(
+        self,
+        name: str,
+        *,
+        get: Callable[[Context], object],
+        set: Callable[[object], bool] | None = None,
+    ) -> Cleanup:
+        """Define a computed context property and return a disposer for it."""
+        if name in self._accessors or name in self._services:
+            raise DuplicateServiceError(f"Context property {name!r} is already declared")
+        self._accessors[name] = (get, set)
+
+        def remove() -> None:
+            self._accessors.pop(name, None)
+
+        disposer = _once(remove)
+        self._register_cleanup(disposer)
+        return disposer
+
+    def mixin(
+        self, source: str | object, mixins: Iterable[str] | Mapping[str, str]
+    ) -> Cleanup:
+        """Expose selected source members as reversible Context accessors."""
+        entries = ((name, name) for name in mixins) if not isinstance(mixins, Mapping) else mixins.items()
+        disposers: list[Cleanup] = []
+        for source_name, target_name in entries:
+            def getter(ctx: Context, member: str = source_name) -> object:
+                target = ctx.get(source) if isinstance(source, str) else source
+                if target is None:
+                    return None
+                return getattr(target, member)
+
+            disposers.append(self.accessor(target_name, get=getter))
+
+        def remove() -> None:
+            for disposer in reversed(disposers):
+                disposer()
+
+        return _once(remove)
 
     def effect(self, setup: Callable[[], object]) -> Cleanup:
         """Run setup now and bind its optional cleanup to the current plugin scope."""
@@ -411,6 +504,7 @@ class Context:
         for disposer in reversed(list(self._service_disposers.values())):
             disposer()
         self._listeners.clear()
+        self._accessors.clear()
         self._disposed = True
         if self._parent is not None:
             self._parent._children.remove(self)
@@ -482,6 +576,26 @@ class Context:
     def _assert_open(self) -> None:
         if self._disposed:
             raise RuntimeError("This context has already been disposed")
+
+    def __getattr__(self, name: str) -> object:
+        """Resolve declared accessors and currently visible services like Cordis's proxy."""
+        if name.startswith("_"):
+            raise AttributeError(name)
+        accessor = self._find_accessor(name)
+        if accessor is not None:
+            return accessor[0](self)
+        if self.has(name):
+            return self.get(name)
+        raise AttributeError(f"Context has no declared property {name!r}")
+
+    def _find_accessor(
+        self, name: str
+    ) -> tuple[Callable[[Context], object], Callable[[object], bool] | None] | None:
+        if name in self._accessors:
+            return self._accessors[name]
+        if self._parent is None:
+            return None
+        return self._parent._find_accessor(name)
 
 
 def _once(cleanup: Cleanup) -> Cleanup:
