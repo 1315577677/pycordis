@@ -103,6 +103,17 @@ class Fiber:
         """Unload the fiber and await this compatibility API's settled cleanup."""
         self._dispose_sync()
 
+    def restart(self) -> None:
+        """Unload and immediately reapply this fiber with its current config."""
+        self._assert_not_disposed()
+        self._restart_sync()
+
+    def update(self, config: object) -> None:
+        """Store a new config and restart the plugin lifecycle."""
+        self._assert_not_disposed()
+        self.config = config
+        self._restart_sync()
+
     def _add_cleanup(self, cleanup: Cleanup) -> None:
         self._cleanups.append(cleanup)
 
@@ -153,11 +164,21 @@ class Fiber:
         self._context.registry._remove(self)
         self._context._request_refresh()
 
+    def _restart_sync(self) -> None:
+        self.state = FiberState.UNLOADING
+        self._dispose_registrations()
+        self.state = FiberState.PENDING
+        self._context._request_refresh()
+
     def _dispose_registrations(self) -> None:
         cleanups = self._cleanups
         self._cleanups = []
         for cleanup in reversed(cleanups):
             _collect_effect(cleanup(), lambda _: None)
+
+    def _assert_not_disposed(self) -> None:
+        if self.state is FiberState.DISPOSED:
+            raise RuntimeError(f"Plugin fiber {self.name!r} has been disposed")
 
 
 class PluginHandle:
@@ -331,7 +352,7 @@ class Context:
         """Replace a service only when it is owned by this context."""
         if name in self._services:
             self._services[name] = service
-            self._request_refresh()
+            self._request_refresh({name})
             return
         if self._parent is not None and self._parent.has(name):
             raise PermissionError(
@@ -517,36 +538,44 @@ class Context:
         if self._scope_stack:
             self._scope_stack[-1]._add_cleanup(cleanup)
 
-    def _request_refresh(self) -> None:
+    def _request_refresh(self, changed_services: set[str] | None = None) -> None:
         root = self
         while root._parent is not None:
             root = root._parent
-        root._refresh_tree()
+        root._refresh_tree(changed_services or set())
 
-    def _refresh_tree(self) -> None:
+    def _refresh_tree(self, changed_services: set[str]) -> None:
         if self._refreshing:
             return
 
         self._refreshing = True
         try:
             changed = True
+            force_restart = changed_services.copy()
             while changed:
                 changed = False
                 for context in self._walk():
                     for handle in context._handles:
                         if (
                             handle.state is PluginState.ACTIVE
-                            and not context._dependencies_available(handle.plugin.inject)
+                            and (
+                                not context._dependencies_available(handle.plugin.inject)
+                                or bool(set(handle.plugin.inject) & force_restart)
+                            )
                         ):
                             handle._deactivate_for_missing_dependency()
                             changed = True
                     for fiber in context._fibers:
                         if (
                             fiber.state is FiberState.ACTIVE
-                            and not context._dependencies_available(fiber.inject)
+                            and (
+                                not context._dependencies_available(fiber.inject)
+                                or bool(set(fiber.inject) & force_restart)
+                            )
                         ):
                             fiber._deactivate_for_missing_dependency()
                             changed = True
+                force_restart.clear()
                 for context in self._walk():
                     for handle in context._handles:
                         if (
