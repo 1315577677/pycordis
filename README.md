@@ -25,7 +25,7 @@ features—and will be implemented only after their hosting runtime is complete.
 | Fiber and effect lifecycle | First version complete | config validation, async effects, reload, restart, update, diagnostics |
 | Registry and plugin forms | Next in kernel | function, class, and object plugins; injected configuration |
 | Reflection and services | Next in kernel | `get`, `set`, `provide`, accessor, mixin, `Service` |
-| Events | Next in kernel | `emit`, `parallel`, `serial`, `bail`, `waterfall`, `once`, filters |
+| Events | First version complete | `emit`, `parallel`, `serial`, `bail`, `waterfall`, `once`, target filters, global listeners |
 | Loader, logger, configuration | After kernel | configuration rows, module loading, diagnostics |
 | Harness capabilities | After framework | models, tools, sessions, sandbox, storage, loops, scheduling, UI |
 
@@ -59,7 +59,7 @@ PyCordis 是对 DeepSeek Harness 底层 **Cordis** 框架的 Python 复刻项目
 | Fiber 与 Effect 生命周期 | 第一版完成 | 配置校验、异步 effect、重载、重启、更新、诊断 |
 | Registry 与插件形态 | 内核下一步 | 函数、类、对象插件与注入配置 |
 | Reflect 与 Service | 内核下一步 | `get`、`set`、`provide`、accessor、mixin、`Service` |
-| Events | 内核下一步 | `emit`、`parallel`、`serial`、`bail`、`waterfall`、`once`、过滤器 |
+| Events | 第一版完成 | `emit`、`parallel`、`serial`、`bail`、`waterfall`、`once`、目标过滤与全局监听 |
 | Loader、Logger、配置系统 | 内核后续 | 配置行、模块加载与诊断 |
 | Harness 能力插件 | 框架完成后 | 模型、工具、Session、Sandbox、Storage、Loop、Schedule、UI |
 

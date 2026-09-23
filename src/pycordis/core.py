@@ -51,6 +51,15 @@ class FiberDiagnostics:
 
 
 @dataclass(frozen=True, slots=True)
+class EventHook:
+    """One listener registration and the Context scope that owns it."""
+
+    context: Context
+    callback: Listener
+    global_: bool = False
+
+
+@dataclass(frozen=True, slots=True)
 class Plugin:
     """A named unit of behavior that can require services from a context."""
 
@@ -310,7 +319,7 @@ class Context:
         self._children: list[Context] = []
         self._services: dict[str, object] = {}
         self._service_disposers: dict[str, Cleanup] = {}
-        self._listeners: dict[str, list[Listener]] = defaultdict(list)
+        self._listeners: dict[str, list[EventHook]] = defaultdict(list)
         self._accessors: dict[str, tuple[Callable[[Context], object], Callable[[object], bool] | None]] = {}
         self._intercepts: dict[str, dict[str, object]] = {}
         self._handles: list[PluginHandle] = []
@@ -320,6 +329,7 @@ class Context:
             f"pycordis-active-scope-{id(self)}", default=None
         )
         self._isolated: set[str] = set()
+        self._isolation_labels: dict[str, object] = {}
         self._refreshing = False
         self._disposed = False
         self.registry = parent.registry if parent is not None else PluginRegistry()
@@ -340,6 +350,7 @@ class Context:
         """Create a child whose service scope for ``name`` does not inherit upward."""
         isolated = self.child()
         isolated._isolated.add(name)
+        isolated._isolation_labels[name] = object()
         return isolated
 
     def intercept(self, name: str, config: Mapping[str, object]) -> Context:
@@ -498,18 +509,26 @@ class Context:
         self._register_cleanup(cleanup)
         return cleanup
 
-    def on(self, event: str, listener: Listener, *, prepend: bool = False) -> Cleanup:
+    def on(
+        self,
+        event: str,
+        listener: Listener,
+        *,
+        prepend: bool = False,
+        global_: bool = False,
+    ) -> Cleanup:
         """Register an event listener and return an idempotent disposer."""
         self._assert_open()
         listeners = self._listeners[event]
+        hook = EventHook(context=self, callback=listener, global_=global_)
         if prepend:
-            listeners.insert(0, listener)
+            listeners.insert(0, hook)
         else:
-            listeners.append(listener)
+            listeners.append(hook)
 
         def remove() -> None:
             try:
-                listeners.remove(listener)
+                listeners.remove(hook)
             except ValueError:
                 return
 
@@ -517,7 +536,14 @@ class Context:
         self._register_cleanup(disposer)
         return disposer
 
-    def once(self, event: str, listener: Listener, *, prepend: bool = False) -> Cleanup:
+    def once(
+        self,
+        event: str,
+        listener: Listener,
+        *,
+        prepend: bool = False,
+        global_: bool = False,
+    ) -> Cleanup:
         """Register a listener that removes itself before its first invocation."""
         disposer: Cleanup
 
@@ -525,35 +551,35 @@ class Context:
             disposer()
             return listener(*args)
 
-        disposer = self.on(event, wrapped, prepend=prepend)
+        disposer = self.on(event, wrapped, prepend=prepend, global_=global_)
         return disposer
 
-    def emit(self, event: str, *args: object) -> None:
+    def emit(self, event: str, *args: object, target: Context | None = None) -> None:
         """Notify all listeners in registration order and ignore their values."""
-        for listener in self._listeners_for(event):
+        for listener in self._listeners_for(event, target):
             listener(*args)
 
-    def bail(self, event: str, *args: object) -> object | None:
+    def bail(self, event: str, *args: object, target: Context | None = None) -> object | None:
         """Return the first Cordis bail value (anything except ``None`` or ``False``)."""
-        for listener in self._listeners_for(event):
+        for listener in self._listeners_for(event, target):
             value = listener(*args)
             if _is_bailed(value):
                 return value
         return None
 
-    async def parallel(self, event: str, *args: object) -> None:
+    async def parallel(self, event: str, *args: object, target: Context | None = None) -> None:
         """Await all listeners concurrently, raising an exception group on failure."""
         results = await asyncio.gather(
-            *(_await_result(listener(*args)) for listener in self._listeners_for(event)),
+            *(_await_result(listener(*args)) for listener in self._listeners_for(event, target)),
             return_exceptions=True,
         )
         errors = [result for result in results if isinstance(result, BaseException)]
         if errors:
             raise ExceptionGroup(f"Errors while dispatching {event!r}", errors)
 
-    async def serial(self, event: str, *args: object) -> object | None:
+    async def serial(self, event: str, *args: object, target: Context | None = None) -> object | None:
         """Await listeners in order and return the first Cordis bail value."""
-        for listener in self._listeners_for(event):
+        for listener in self._listeners_for(event, target):
             value = await _await_result(listener(*args))
             if _is_bailed(value):
                 return value
@@ -563,10 +589,11 @@ class Context:
         self,
         event: str,
         *args: object,
+        target: Context | None = None,
         terminal: Callable[..., object] | None = None,
     ) -> object | None:
         """Run around-middleware listeners, with each receiving a ``next_`` callable."""
-        listeners = self._listeners_for(event)
+        listeners = self._listeners_for(event, target)
 
         def dispatch(index: int, current_args: tuple[object, ...]) -> object | None:
             if index == len(listeners):
@@ -598,9 +625,40 @@ class Context:
         if self._parent is not None:
             self._parent._children.remove(self)
 
-    def _listeners_for(self, event: str) -> list[Listener]:
-        inherited = self._parent._listeners_for(event) if self._parent is not None else []
-        return [*inherited, *self._listeners[event]]
+    def _listeners_for(self, event: str, target: Context | None = None) -> list[Listener]:
+        return [
+            hook.callback
+            for hook in self._hooks_for(event)
+            if target is None or hook.global_ or target._matches_event_scope(hook.context)
+        ]
+
+    def _hooks_for(self, event: str) -> list[EventHook]:
+        root = self
+        while root._parent is not None:
+            root = root._parent
+        return [
+            hook
+            for context in root._walk()
+            for hook in context._listeners[event]
+        ]
+
+    def _matches_event_scope(self, listener_context: Context) -> bool:
+        names = self._isolation_names() | listener_context._isolation_names()
+        return all(
+            self._isolation_label(name) is listener_context._isolation_label(name)
+            for name in names
+        )
+
+    def _isolation_names(self) -> set[str]:
+        inherited = self._parent._isolation_names() if self._parent is not None else set()
+        return inherited | set(self._isolation_labels)
+
+    def _isolation_label(self, name: str) -> object | None:
+        if name in self._isolation_labels:
+            return self._isolation_labels[name]
+        if self._parent is None:
+            return None
+        return self._parent._isolation_label(name)
 
     def _register_cleanup(self, cleanup: Cleanup) -> None:
         scope = self._active_scope.get()
