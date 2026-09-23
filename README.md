@@ -22,7 +22,7 @@ features—and will be implemented only after their hosting runtime is complete.
 | Area | Status | Scope |
 | --- | --- | --- |
 | Context, service dependency, reversible registration | In progress | Context hierarchy and plugin activation lifecycle |
-| Fiber and effect lifecycle | Next in kernel | async effects, reload, restart, update, diagnostics |
+| Fiber and effect lifecycle | First version complete | config validation, async effects, reload, restart, update, diagnostics |
 | Registry and plugin forms | Next in kernel | function, class, and object plugins; injected configuration |
 | Reflection and services | Next in kernel | `get`, `set`, `provide`, accessor, mixin, `Service` |
 | Events | Next in kernel | `emit`, `parallel`, `serial`, `bail`, `waterfall`, `once`, filters |
@@ -56,7 +56,7 @@ PyCordis 是对 DeepSeek Harness 底层 **Cordis** 框架的 Python 复刻项目
 | 模块 | 状态 | 内容 |
 | --- | --- | --- |
 | Context、服务依赖、可逆注册 | 进行中 | Context 层级与插件激活生命周期 |
-| Fiber 与 Effect 生命周期 | 内核下一步 | 异步 effect、重载、重启、更新、诊断 |
+| Fiber 与 Effect 生命周期 | 第一版完成 | 配置校验、异步 effect、重载、重启、更新、诊断 |
 | Registry 与插件形态 | 内核下一步 | 函数、类、对象插件与注入配置 |
 | Reflect 与 Service | 内核下一步 | `get`、`set`、`provide`、accessor、mixin、`Service` |
 | Events | 内核下一步 | `emit`、`parallel`、`serial`、`bail`、`waterfall`、`once`、过滤器 |

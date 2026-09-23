@@ -12,3 +12,6 @@ class DuplicateServiceError(PyCordisError):
 class PluginActivationError(PyCordisError):
     """Raised when a plugin fails while its lifecycle is being activated."""
 
+
+class ConfigValidationError(PyCordisError, ValueError):
+    """Raised when a plugin's declared configuration validator rejects a value."""

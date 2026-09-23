@@ -6,11 +6,12 @@ from collections import defaultdict
 import asyncio
 import inspect
 from collections.abc import AsyncIterable, Callable, Iterable, Mapping
+from contextvars import ContextVar
 from dataclasses import dataclass
 from enum import Enum, auto
 from typing import Any, TypeAlias
 
-from .errors import DuplicateServiceError, PluginActivationError
+from .errors import ConfigValidationError, DuplicateServiceError, PluginActivationError
 
 Cleanup: TypeAlias = Callable[[], object]
 Listener: TypeAlias = Callable[..., Any]
@@ -35,6 +36,18 @@ class FiberState(Enum):
     FAILED = auto()
     DISPOSED = auto()
     UNLOADING = auto()
+
+
+@dataclass(frozen=True, slots=True)
+class FiberDiagnostics:
+    """A stable, read-only snapshot of a Fiber's observable lifecycle state."""
+
+    name: str
+    state: FiberState
+    dependencies: tuple[str, ...]
+    config: object
+    error_type: str | None
+    error_message: str | None
 
 
 @dataclass(frozen=True, slots=True)
@@ -93,15 +106,45 @@ class Fiber:
         self.plugin = plugin
         self.key = _plugin_key(plugin)
         self.name = _plugin_name(plugin)
+        self.raw_config = config
         self.config = config
         self.inject = _plugin_inject(plugin)
         self.state = FiberState.PENDING
-        self.error: PluginActivationError | None = None
+        self.error: BaseException | None = None
         self._cleanups: list[Cleanup] = []
+        self._activation_task: asyncio.Task[None] | None = None
 
     async def dispose(self) -> None:
-        """Unload the fiber and await this compatibility API's settled cleanup."""
-        self._dispose_sync()
+        """Unload the fiber, awaiting any in-flight startup and cleanup work."""
+        if self.state is FiberState.DISPOSED:
+            return
+        if self._activation_task is not None:
+            await self._activation_task
+        self.state = FiberState.UNLOADING
+        await self._dispose_registrations_async()
+        self.state = FiberState.DISPOSED
+        self._context.registry._remove(self)
+        self._context._request_refresh()
+
+    async def wait(self) -> Fiber:
+        """Wait for current asynchronous loading work and re-raise any startup error."""
+        if self._activation_task is not None:
+            await self._activation_task
+        if self.error is not None:
+            raise self.error
+        return self
+
+    @property
+    def diagnostics(self) -> FiberDiagnostics:
+        """Return the Fiber state needed by an inspector or operations console."""
+        return FiberDiagnostics(
+            name=self.name,
+            state=self.state,
+            dependencies=self.inject,
+            config=self.config,
+            error_type=type(self.error).__name__ if self.error is not None else None,
+            error_message=str(self.error) if self.error is not None else None,
+        )
 
     def restart(self) -> None:
         """Unload and immediately reapply this fiber with its current config."""
@@ -111,7 +154,7 @@ class Fiber:
     def update(self, config: object) -> None:
         """Store a new config and restart the plugin lifecycle."""
         self._assert_not_disposed()
-        self.config = config
+        self.raw_config = config
         self._restart_sync()
 
     def _add_cleanup(self, cleanup: Cleanup) -> None:
@@ -123,19 +166,30 @@ class Fiber:
         self.state = FiberState.LOADING
         self._context._scope_stack.append(self)
         try:
-            _collect_effect(self._invoke(), self._add_cleanup)
+            effect = self._invoke()
+            if _requires_async_collection(effect) and _has_running_loop():
+                self._activation_task = asyncio.create_task(self._activate_async(effect))
+                return
+            _collect_effect(effect, self._add_cleanup)
             self.state = FiberState.ACTIVE
         except Exception as error:
-            self._dispose_registrations()
-            self.state = FiberState.FAILED
-            self.error = PluginActivationError(
-                f"Plugin {self.name!r} failed to activate"
-            )
-            raise self.error from error
+            self._fail(error)
         finally:
             self._context._scope_stack.pop()
 
+    async def _activate_async(self, effect: object) -> None:
+        token = self._context._active_scope.set(self)
+        try:
+            await _collect_effect_async(effect, self._add_cleanup)
+            if self.state is FiberState.LOADING:
+                self.state = FiberState.ACTIVE
+        except Exception as error:
+            self._fail(error)
+        finally:
+            self._context._active_scope.reset(token)
+
     def _invoke(self) -> object:
+        self.config = _validate_plugin_config(self.plugin, self.raw_config)
         if isinstance(self.plugin, Plugin):
             return self.plugin.apply(self._context)
         if inspect.isclass(self.plugin):
@@ -175,6 +229,17 @@ class Fiber:
         self._cleanups = []
         for cleanup in reversed(cleanups):
             _collect_effect(cleanup(), lambda _: None)
+
+    async def _dispose_registrations_async(self) -> None:
+        cleanups = self._cleanups
+        self._cleanups = []
+        for cleanup in reversed(cleanups):
+            await _collect_effect_async(cleanup(), lambda _: None)
+
+    def _fail(self, error: BaseException) -> None:
+        self._dispose_registrations()
+        self.state = FiberState.FAILED
+        self.error = error
 
     def _assert_not_disposed(self) -> None:
         if self.state is FiberState.DISPOSED:
@@ -251,6 +316,9 @@ class Context:
         self._handles: list[PluginHandle] = []
         self._fibers: list[Fiber] = []
         self._scope_stack: list[PluginHandle | Fiber] = []
+        self._active_scope: ContextVar[PluginHandle | Fiber | None] = ContextVar(
+            f"pycordis-active-scope-{id(self)}", default=None
+        )
         self._isolated: set[str] = set()
         self._refreshing = False
         self._disposed = False
@@ -535,7 +603,10 @@ class Context:
         return [*inherited, *self._listeners[event]]
 
     def _register_cleanup(self, cleanup: Cleanup) -> None:
-        if self._scope_stack:
+        scope = self._active_scope.get()
+        if scope is not None:
+            scope._add_cleanup(cleanup)
+        elif self._scope_stack:
             self._scope_stack[-1]._add_cleanup(cleanup)
 
     def _request_refresh(self, changed_services: set[str] | None = None) -> None:
@@ -670,6 +741,22 @@ def _plugin_inject(plugin: object) -> tuple[str, ...]:
     return tuple(inject or ())
 
 
+def _validate_plugin_config(plugin: object, config: object) -> object:
+    """Apply the optional Python ``Config`` validator declared by a plugin."""
+    validator = getattr(plugin, "Config", None)
+    if validator is None:
+        return config
+    validate = getattr(validator, "validate", validator)
+    if not callable(validate):
+        raise TypeError("plugin Config must be callable or expose validate()")
+    try:
+        return validate(config)
+    except ConfigValidationError:
+        raise
+    except Exception as error:
+        raise ConfigValidationError(str(error)) from error
+
+
 def _invoke_with_config(callback: Callable[..., object], context: Context, config: object) -> object:
     """Call a Python plugin with config only when its signature accepts it."""
     try:
@@ -685,6 +772,18 @@ def _is_bailed(value: object) -> bool:
 
 async def _await_result(value: object) -> object:
     return await value if inspect.isawaitable(value) else value
+
+
+def _requires_async_collection(value: object) -> bool:
+    return inspect.isawaitable(value) or isinstance(value, AsyncIterable)
+
+
+def _has_running_loop() -> bool:
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        return False
+    return True
 
 
 def _collect_effect(result: object, collect: Callable[[Cleanup], None]) -> None:
@@ -707,6 +806,27 @@ def _collect_effect(result: object, collect: Callable[[Cleanup], None]) -> None:
     if isinstance(result, Iterable) and not isinstance(result, (bytes, str, Mapping)):
         for value in result:
             _collect_effect(value, collect)
+        return
+    raise TypeError("effect must return a cleanup, iterable, async iterable, or awaitable")
+
+
+async def _collect_effect_async(result: object, collect: Callable[[Cleanup], None]) -> None:
+    """Asynchronously normalize Cordis effect shapes without nesting event loops."""
+    if result is None:
+        return
+    if callable(result):
+        collect(result)
+        return
+    if inspect.isawaitable(result):
+        await _collect_effect_async(await result, collect)
+        return
+    if isinstance(result, AsyncIterable):
+        async for value in result:
+            await _collect_effect_async(value, collect)
+        return
+    if isinstance(result, Iterable) and not isinstance(result, (bytes, str, Mapping)):
+        for value in result:
+            await _collect_effect_async(value, collect)
         return
     raise TypeError("effect must return a cleanup, iterable, async iterable, or awaitable")
 

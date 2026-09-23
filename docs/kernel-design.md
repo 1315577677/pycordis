@@ -34,7 +34,7 @@ plugin are released in reverse order when its fiber unloads.
 | --- | --- | --- |
 | `context.ts` | `Context`、`child()`、`extend()`、`isolate()`、`intercept()` | 已实现基础语义 |
 | `registry.ts` | `PluginRegistry`、`Context.plugin()`、`Context.inject()` | 已实现基础语义 |
-| `fiber.ts` | `Fiber`、依赖激活、effect 反注册、restart/update | 已实现第一版 |
+| `fiber.ts` | `Fiber`、依赖激活、同步/异步 effect、配置校验、restart/update、诊断 | 已实现第一版 |
 | `reflect.ts` | `get()`、`set()`、`provide()`、`accessor()`、`mixin()` | 已实现第一版 |
 | `service.ts` | `Service` 基类与稳定服务名 | 已实现第一版 |
 | `events.ts` | `emit()`、`parallel()`、`serial()`、`bail()`、`waterfall()`、`once()` | 已实现第一版 |
@@ -67,10 +67,10 @@ observability, and edge semantics will continue to converge with Cordis.
 
 ## 下一阶段 / Next stage
 
-先完成内核收敛：事件过滤器、Fiber 错误状态/诊断、配置验证、Service 调用追踪和 Logger。
+先完成内核收敛：事件过滤器、Service 调用追踪和 Logger。
 随后实现 Loader，最后才构建 Harness 层的模型、工具、Session、Sandbox、Storage、Loop、Schedule 和 UI 插件。
 
-First, converge the kernel with event filters, fiber diagnostics, configuration
-validation, service call tracing, and logging. Then implement the Loader.
+First, converge the kernel with event filters, service call tracing, and
+logging. Then implement the Loader.
 Only after that should Harness plugins for models, tools, sessions, sandboxing,
 storage, loops, scheduling, and UI be added.
