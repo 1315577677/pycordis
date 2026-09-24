@@ -10,6 +10,7 @@ from .core import (
     PluginRegistry,
     PluginState,
     Service,
+    ServiceCall,
 )
 from .errors import ConfigValidationError, DuplicateServiceError, PluginActivationError
 
@@ -26,4 +27,5 @@ __all__ = [
     "PluginRegistry",
     "PluginState",
     "Service",
+    "ServiceCall",
 ]

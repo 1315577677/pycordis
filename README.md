@@ -24,7 +24,7 @@ features—and will be implemented only after their hosting runtime is complete.
 | Context, service dependency, reversible registration | In progress | Context hierarchy and plugin activation lifecycle |
 | Fiber and effect lifecycle | First version complete | config validation, async effects, reload, restart, update, diagnostics |
 | Registry and plugin forms | Next in kernel | function, class, and object plugins; injected configuration |
-| Reflection and services | Next in kernel | `get`, `set`, `provide`, accessor, mixin, `Service` |
+| Reflection and services | First version complete | `get`, `set`, `provide`, accessor, mixin, caller-aware `Service` invocation |
 | Events | First version complete | `emit`, `parallel`, `serial`, `bail`, `waterfall`, `once`, target filters, global listeners |
 | Loader, logger, configuration | After kernel | configuration rows, module loading, diagnostics |
 | Harness capabilities | After framework | models, tools, sessions, sandbox, storage, loops, scheduling, UI |
@@ -39,8 +39,10 @@ features—and will be implemented only after their hosting runtime is complete.
 - Removing a dependency deactivates affected plugins; restoring it activates
   them again.
 - Child contexts can consume parent services while keeping local registrations.
-- `emit`, `bail`, and `waterfall` are already implemented; the remaining
-  Cordis dispatch modes are part of the kernel-completion work.
+- All five dispatch modes (`emit`, `parallel`, `serial`, `bail`, and
+  `waterfall`) support target filters and global listeners.
+- A service method runs in the calling `Context`, including after an `await`;
+  root contexts expose immutable `service_calls` records for diagnostics.
 
 ## 中文
 
@@ -58,7 +60,7 @@ PyCordis 是对 DeepSeek Harness 底层 **Cordis** 框架的 Python 复刻项目
 | Context、服务依赖、可逆注册 | 进行中 | Context 层级与插件激活生命周期 |
 | Fiber 与 Effect 生命周期 | 第一版完成 | 配置校验、异步 effect、重载、重启、更新、诊断 |
 | Registry 与插件形态 | 内核下一步 | 函数、类、对象插件与注入配置 |
-| Reflect 与 Service | 内核下一步 | `get`、`set`、`provide`、accessor、mixin、`Service` |
+| Reflect 与 Service | 第一版完成 | `get`、`set`、`provide`、accessor、mixin、调用方感知的 `Service` 调用 |
 | Events | 第一版完成 | `emit`、`parallel`、`serial`、`bail`、`waterfall`、`once`、目标过滤与全局监听 |
 | Loader、Logger、配置系统 | 内核后续 | 配置行、模块加载与诊断 |
 | Harness 能力插件 | 框架完成后 | 模型、工具、Session、Sandbox、Storage、Loop、Schedule、UI |
@@ -70,4 +72,5 @@ PyCordis 是对 DeepSeek Harness 底层 **Cordis** 框架的 Python 复刻项目
 - `provide()`、`on()`、`effect()` 都可逆；插件内部创建的注册会随插件卸载而释放。
 - 服务消失时，依赖它的插件会停用；服务恢复后会重新激活。
 - 子 Context 可以读取父 Context 的服务，同时保有自己的本地注册。
-- 当前已实现 `emit`、`bail`、`waterfall`；其余 Cordis 事件模式将作为内核完成工作的一部分。
+- 五种事件分发模式（`emit`、`parallel`、`serial`、`bail`、`waterfall`）均支持目标过滤与全局监听。
+- Service 方法会在调用方 `Context` 中执行，跨 `await` 后仍保持该作用域；根 Context 通过只读的 `service_calls` 提供诊断记录。

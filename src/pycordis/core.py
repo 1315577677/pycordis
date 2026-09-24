@@ -60,6 +60,15 @@ class EventHook:
 
 
 @dataclass(frozen=True, slots=True)
+class ServiceCall:
+    """An observable invocation of a Service member through a Context."""
+
+    service: str
+    member: str
+    context: Context
+
+
+@dataclass(frozen=True, slots=True)
 class Plugin:
     """A named unit of behavior that can require services from a context."""
 
@@ -72,15 +81,64 @@ class Service:
     """Base class for plugins that provide a stable named context service."""
 
     def __init__(self, ctx: Context, name: str) -> None:
-        self.ctx = ctx
+        self._owner_context = ctx
+        self._call_context: ContextVar[Context | None] = ContextVar(
+            f"pycordis-service-context-{id(self)}", default=None
+        )
         self.name = name
         self._dispose = ctx.provide(name, self)
+
+    @property
+    def ctx(self) -> Context:
+        """Return the caller's Context while a traced service method is executing."""
+        return self._call_context.get() or self._owner_context
 
     def resolve_config(
         self, base: Mapping[str, object] | None = None, head: Mapping[str, object] | None = None
     ) -> dict[str, object]:
         """Resolve this service's intercepted configuration for the current context."""
         return self.ctx.resolve_config(self.name, base, head)
+
+    def _view_for(self, context: Context) -> _ServiceView:
+        return _ServiceView(self, context)
+
+
+class _ServiceView:
+    """Context-bound view that preserves the caller while invoking a Service."""
+
+    def __init__(self, service: Service, context: Context) -> None:
+        self._service = service
+        self._context = context
+
+    def __getattr__(self, name: str) -> object:
+        token = self._service._call_context.set(self._context)
+        try:
+            member = getattr(self._service, name)
+        finally:
+            self._service._call_context.reset(token)
+        if not callable(member):
+            return member
+
+        def invoke(*args: object, **kwargs: object) -> object:
+            self._context._record_service_call(self._service.name, name)
+            token = self._service._call_context.set(self._context)
+            try:
+                result = member(*args, **kwargs)
+            except BaseException:
+                self._service._call_context.reset(token)
+                raise
+            if inspect.isawaitable(result):
+                return self._await_with_context(result, token)
+            self._service._call_context.reset(token)
+            return result
+
+        return invoke
+
+    async def _await_with_context(self, result: object, token: object) -> object:
+        try:
+            return await result
+        finally:
+            self._service._call_context.reset(token)
 
 
 class PluginRegistry:
@@ -333,6 +391,7 @@ class Context:
         self._refreshing = False
         self._disposed = False
         self.registry = parent.registry if parent is not None else PluginRegistry()
+        self._service_calls: list[ServiceCall] = [] if parent is None else parent._service_calls
 
         if parent is not None:
             parent._children.append(self)
@@ -441,11 +500,15 @@ class Context:
 
     def get(self, name: str, strict: bool = True) -> object | None:
         """Look up a service locally, then through ancestor contexts."""
+        service = self._get_raw(name, strict=strict)
+        return service._view_for(self) if isinstance(service, Service) else service
+
+    def _get_raw(self, name: str, strict: bool = True) -> object | None:
         if name in self._services:
             return self._services[name]
         if name in self._isolated or self._parent is None:
             return None
-        return self._parent.get(name, strict=strict)
+        return self._parent._get_raw(name, strict=strict)
 
     def has(self, name: str) -> bool:
         """Return whether a service is currently visible in this context."""
@@ -454,6 +517,11 @@ class Context:
         if name in self._isolated or self._parent is None:
             return False
         return self._parent.has(name)
+
+    @property
+    def service_calls(self) -> tuple[ServiceCall, ...]:
+        """Return recorded Service calls from this Context tree's root."""
+        return tuple(self._service_calls)
 
     def accessor(
         self,
@@ -666,6 +734,12 @@ class Context:
             scope._add_cleanup(cleanup)
         elif self._scope_stack:
             self._scope_stack[-1]._add_cleanup(cleanup)
+
+    def _record_service_call(self, service: str, member: str) -> None:
+        root = self
+        while root._parent is not None:
+            root = root._parent
+        root._service_calls.append(ServiceCall(service, member, self))
 
     def _request_refresh(self, changed_services: set[str] | None = None) -> None:
         root = self
