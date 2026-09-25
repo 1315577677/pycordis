@@ -26,7 +26,8 @@ features—and will be implemented only after their hosting runtime is complete.
 | Registry and plugin forms | Next in kernel | function, class, and object plugins; injected configuration |
 | Reflection and services | First version complete | `get`, `set`, `provide`, accessor, mixin, caller-aware `Service` invocation |
 | Events | First version complete | `emit`, `parallel`, `serial`, `bail`, `waterfall`, `once`, target filters, global listeners |
-| Loader, logger, configuration | After kernel | configuration rows, module loading, diagnostics |
+| Structured logger | First version complete | named loggers, four severity levels, bounded records, scoped exporters |
+| Loader and configuration | After kernel | configuration rows, module loading, diagnostics |
 | Harness capabilities | After framework | models, tools, sessions, sandbox, storage, loops, scheduling, UI |
 
 ### Current kernel contracts
@@ -43,6 +44,9 @@ features—and will be implemented only after their hosting runtime is complete.
   `waterfall`) support target filters and global listeners.
 - A service method runs in the calling `Context`, including after an `await`;
   root contexts expose immutable `service_calls` records for diagnostics.
+- `ctx.logger(name)` creates a named structured logger. The default level is
+  `INFO`; `ctx.intercept("logger", ...)` can override a Context's name and
+  threshold, and exporters registered in a plugin are released with its Fiber.
 
 ## 中文
 
@@ -62,7 +66,8 @@ PyCordis 是对 DeepSeek Harness 底层 **Cordis** 框架的 Python 复刻项目
 | Registry 与插件形态 | 内核下一步 | 函数、类、对象插件与注入配置 |
 | Reflect 与 Service | 第一版完成 | `get`、`set`、`provide`、accessor、mixin、调用方感知的 `Service` 调用 |
 | Events | 第一版完成 | `emit`、`parallel`、`serial`、`bail`、`waterfall`、`once`、目标过滤与全局监听 |
-| Loader、Logger、配置系统 | 内核后续 | 配置行、模块加载与诊断 |
+| 结构化 Logger | 第一版完成 | 命名 Logger、四级日志、有限记录缓冲区、作用域导出器 |
+| Loader 与配置系统 | 内核后续 | 配置行、模块加载与诊断 |
 | Harness 能力插件 | 框架完成后 | 模型、工具、Session、Sandbox、Storage、Loop、Schedule、UI |
 
 ### 当前内核约定
@@ -74,3 +79,4 @@ PyCordis 是对 DeepSeek Harness 底层 **Cordis** 框架的 Python 复刻项目
 - 子 Context 可以读取父 Context 的服务，同时保有自己的本地注册。
 - 五种事件分发模式（`emit`、`parallel`、`serial`、`bail`、`waterfall`）均支持目标过滤与全局监听。
 - Service 方法会在调用方 `Context` 中执行，跨 `await` 后仍保持该作用域；根 Context 通过只读的 `service_calls` 提供诊断记录。
+- `ctx.logger(name)` 会创建具名的结构化 Logger，默认等级为 `INFO`；可通过 `ctx.intercept("logger", ...)` 为指定 Context 覆盖名称和等级，插件内注册的导出器会随 Fiber 卸载。

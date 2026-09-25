@@ -38,7 +38,7 @@ plugin are released in reverse order when its fiber unloads.
 | `reflect.ts` | `get()`、`set()`、`provide()`、`accessor()`、`mixin()`、调用方作用域绑定 | 已实现第一版 |
 | `service.ts` | `Service` 基类、稳定服务名与 `ServiceCall` 调用记录 | 已实现第一版 |
 | `events.ts` | `emit()`、`parallel()`、`serial()`、`bail()`、`waterfall()`、`once()`、目标过滤、全局监听 | 已实现第一版 |
-| `logger.ts` | 结构化 logger、按 Fiber 命名 | 待实现 |
+| `logger.ts` | 结构化 Logger、按 Fiber 命名、等级过滤、有限记录缓冲区和可逆导出器 | 已实现第一版 |
 | loader packages | 配置行、模块解析、热更新 | 待实现 |
 
 “第一版”表示核心行为已被测试覆盖，但仍会持续对齐官方的错误诊断、过滤器、可观测性和边界语义。
@@ -65,12 +65,13 @@ observability, and edge semantics will continue to converge with Cordis.
 - `waterfall` 中不调用 `next_()` 即表示短路后续行为。
 - `isolate(name)` 不会修改父 Context，且允许子 Context 为该服务提供独立实现。
 - Service 方法总是从取得服务的调用方 Context 读取作用域和配置；异步调用跨 `await` 后仍保持该 Context。
+- Logger 默认记录 `ERROR`、`WARN`、`INFO`，可由 `intercept("logger", ...)` 在调用方 Context 中覆盖名称和阈值；每条记录保留时间、序号、名称、等级、原始参数及 Fiber 名称。
 
 ## 下一阶段 / Next stage
 
-先完成内核收敛：结构化 Logger。
-随后实现 Loader，最后才构建 Harness 层的模型、工具、Session、Sandbox、Storage、Loop、Schedule 和 UI 插件。
+下一步实现 Loader：配置行、模块解析和热更新。
+随后才构建 Harness 层的模型、工具、Session、Sandbox、Storage、Loop、Schedule 和 UI 插件。
 
-First, converge the kernel with structured logging. Then implement the Loader.
-Only after that should Harness plugins for models, tools, sessions, sandboxing,
-storage, loops, scheduling, and UI be added.
+Next, implement the Loader: configuration rows, module resolution, and hot
+updates. Only after that should Harness plugins for models, tools, sessions,
+sandboxing, storage, loops, scheduling, and UI be added.
