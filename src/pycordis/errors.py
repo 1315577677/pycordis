@@ -15,3 +15,7 @@ class PluginActivationError(PyCordisError):
 
 class ConfigValidationError(PyCordisError, ValueError):
     """Raised when a plugin's declared configuration validator rejects a value."""
+
+
+class LoaderError(PyCordisError):
+    """Raised when a declarative Loader entry cannot be resolved."""

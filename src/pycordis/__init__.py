@@ -12,7 +12,8 @@ from .core import (
     Service,
     ServiceCall,
 )
-from .errors import ConfigValidationError, DuplicateServiceError, PluginActivationError
+from .errors import ConfigValidationError, DuplicateServiceError, LoaderError, PluginActivationError
+from .loader import Loader, LoaderEntry
 from .logger import LogRecord, Logger, LoggerLevel, LoggerService
 
 __all__ = [
@@ -26,6 +27,9 @@ __all__ = [
     "Logger",
     "LoggerLevel",
     "LoggerService",
+    "Loader",
+    "LoaderEntry",
+    "LoaderError",
     "Plugin",
     "PluginActivationError",
     "PluginHandle",
