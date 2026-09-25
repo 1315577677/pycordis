@@ -39,7 +39,7 @@ plugin are released in reverse order when its fiber unloads.
 | `service.ts` | `Service` 基类、稳定服务名与 `ServiceCall` 调用记录 | 已实现第一版 |
 | `events.ts` | `emit()`、`parallel()`、`serial()`、`bail()`、`waterfall()`、`once()`、目标过滤、全局监听 | 已实现第一版 |
 | `logger.ts` | 结构化 Logger、按 Fiber 命名、等级过滤、有限记录缓冲区和可逆导出器 | 已实现第一版 |
-| loader packages | 配置行、模块解析、热更新 | 待实现 |
+| loader packages | `LoaderEntry`、增量调和、启用/禁用、`module:attribute` 解析 | 第一步完成 |
 
 “第一版”表示核心行为已被测试覆盖，但仍会持续对齐官方的错误诊断、过滤器、可观测性和边界语义。
 
@@ -69,9 +69,9 @@ observability, and edge semantics will continue to converge with Cordis.
 
 ## 下一阶段 / Next stage
 
-下一步实现 Loader：配置行、模块解析和热更新。
+下一步完成 Loader：配置文件读取、加载诊断、变更检测与模块热更新。
 随后才构建 Harness 层的模型、工具、Session、Sandbox、Storage、Loop、Schedule 和 UI 插件。
 
-Next, implement the Loader: configuration rows, module resolution, and hot
-updates. Only after that should Harness plugins for models, tools, sessions,
-sandboxing, storage, loops, scheduling, and UI be added.
+Next, complete the Loader with configuration file loading, diagnostics, change
+detection, and module hot reload. Only after that should Harness plugins for
+models, tools, sessions, sandboxing, storage, loops, scheduling, and UI be added.
