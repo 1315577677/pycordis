@@ -12,6 +12,7 @@ from enum import Enum, auto
 from typing import Any, TypeAlias
 
 from .errors import ConfigValidationError, DuplicateServiceError, PluginActivationError
+from .logger import LoggerService, _LoggerView
 
 Cleanup: TypeAlias = Callable[[], object]
 Listener: TypeAlias = Callable[..., Any]
@@ -391,6 +392,7 @@ class Context:
         self._refreshing = False
         self._disposed = False
         self.registry = parent.registry if parent is not None else PluginRegistry()
+        self._logger_service = parent._logger_service if parent is not None else LoggerService()
         self._service_calls: list[ServiceCall] = [] if parent is None else parent._service_calls
 
         if parent is not None:
@@ -522,6 +524,11 @@ class Context:
     def service_calls(self) -> tuple[ServiceCall, ...]:
         """Return recorded Service calls from this Context tree's root."""
         return tuple(self._service_calls)
+
+    @property
+    def logger(self) -> _LoggerView:
+        """Return the shared structured logger bound to this calling Context."""
+        return self._logger_service.view(self)
 
     def accessor(
         self,

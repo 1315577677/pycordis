@@ -13,6 +13,7 @@ from .core import (
     ServiceCall,
 )
 from .errors import ConfigValidationError, DuplicateServiceError, PluginActivationError
+from .logger import LogRecord, Logger, LoggerLevel, LoggerService
 
 __all__ = [
     "Context",
@@ -21,6 +22,10 @@ __all__ = [
     "Fiber",
     "FiberDiagnostics",
     "FiberState",
+    "LogRecord",
+    "Logger",
+    "LoggerLevel",
+    "LoggerService",
     "Plugin",
     "PluginActivationError",
     "PluginHandle",
